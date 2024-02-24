@@ -89,21 +89,13 @@ local function getScreenPosRot(pos, size, axis, backwards)
    end
 end
 
-local function loadPortal(chunk, portal)
-   -- local pos, size, rotOffset = portal.pos, portal.size, axisToOffset(portal.axis)
-   -- for x2 = 0, size.x - 1 do
-   --    for y2 = 0, size.y - 1 do
-   --       box(pos + rotOffset * x2 + vec(0, y2, 0))
-   --    end
-   -- end
-   -- table.insert(chunk.portals, {})
-   local id = tostring(portal.pos)
+local function loadPortal(chunk, portal, id)
    -- unload old screens
-   for _, v in pairs(chunk.portals[id] or {}) do
+   for _, v in ipairs(chunk.portals[id] or {}) do
       v:remove()
-   end 
+   end
    -- create new screens
-   local portalList = {}
+   local portalList = {pos = portal.pos, time = 20}
    chunk.portals[id] = portalList
    local size = portal.size
    for i = 1, 2 do
@@ -128,7 +120,7 @@ local function addPortal(dimension, portal)
    portals[dimension][x][z][id] = portal
    local chunkId = x..'_'..z
    if loadedChunks[chunkId] then
-      loadPortal(loadedChunks[chunkId], portal)
+      loadPortal(loadedChunks[chunkId], portal, id)
    end
 end
 
@@ -138,31 +130,44 @@ function events.tick()
    previousBlock = currentBlock
    currentBlock = world.getBlockState(playerPos)
    local dimension = world.getDimension()
-   -- unload, load chunks
+   -- unload chunks
    for i, v in pairs(loadedChunks) do
       v.time = v.time - 1
       if v.time < 0 or v.dimension ~= dimension then
          for _, screenList in pairs(v.portals) do
-            for _, screen in pairs(screenList) do
+            for _, screen in ipairs(screenList) do
                screen:remove()
             end
          end
          loadedChunks[i] = nil
       end
    end
-
+   -- load chunks
    local portalList = portals[dimension] or {}
    local chunkPos = (playerPos.xz / chunkSize):floor()
    for x = chunkPos.x - 1, chunkPos.x + 1 do
       for z = chunkPos.y - 1, chunkPos.y + 1 do
          local id = x..'_'..z
-         if not loadedChunks[id] then
-            loadedChunks[id] = {portals = {}, dimension = dimension}
-            for _, portal in pairs(portalList[x] and portalList[x][z] or {}) do
-               loadPortal(loadedChunks[id], portal)
+         local chunk = loadedChunks[id]
+         if not chunk then
+            chunk = {portals = {}, dimension = dimension}
+            loadedChunks[id] = chunk
+            for portalId, portal in pairs(portalList[x] and portalList[x][z] or {}) do
+               loadPortal(loadedChunks[id], portal, portalId)
             end
          end
-         loadedChunks[id].time = 20
+         for portalId, portal in pairs(chunk.portals) do
+            local shouldBeLoaded = not world.isChunkLoaded(portal.pos) or world.getBlockState(portal.pos).id == 'minecraft:nether_portal'
+            if not portal.time then print(portal) end
+            portal.time = shouldBeLoaded and 40 or portal.time - 1
+            if portal.time < 0 then
+               for _, v in ipairs(chunk.portals[portalId]) do
+                  v:remove()
+               end
+               chunk.portals[portalId] = nil
+            end
+         end
+         chunk.time = 20
       end
    end
    -- cache portals
