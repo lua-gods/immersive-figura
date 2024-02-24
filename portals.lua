@@ -1,20 +1,21 @@
-local portals = {} -- dimension, chunk x, chunk z
+-- get config name
+local serverData = client.getServerData()
+local configName = 'immersive_figura_'..(serverData.ip and serverData.ip:gsub('^.-;', '') or serverData.name)
+-- load cached portal data
+local orginalConfigName = config:getName()
+config:setName(configName)
+local portals = config:load('') or {} -- dimension, chunk x, chunk z
+config:setName(orginalConfigName)
+-- libraries
+local screens = require('screens')
+-- variables
 local loadedChunks = {}
 local chunkSize = 16
-local screens = require('screens')
-
-local function box(p, l)
-   p = p:copy():floor()
-   for _ = 1, 64 do
-      particles.end_rod:pos(
-         p + vec(math.random(), math.random(), math.random())
-      ):velocity(0, 0, 0):gravity(0):size(0.5):lifetime(l or 1000):spawn()
-   end
-end
-
 local portalToSave = nil
+local saveTime, saveDelay = -1, 60
 local previousBlock, currentBlock = world.newBlock('minecraft:air'), world.newBlock('minecraft:air')
 
+-- functions
 local function axisToOffset(a)
    return a == 'x' and vec(1, 0, 0) or vec(0, 0, 1)
 end
@@ -48,25 +49,19 @@ local function findPortal(pos)
    end
    pos.y = pos.y - a
    size.y = a + b + 1
-   -- -- debug bug
-   -- for x = 0, size.x - 1 do
-   --    for y = 0, size.y - 1 do
-   --       box(pos + rotOffset * x + vec(0, y, 0), 2000)
-   --    end
-   -- end
    return pos, size, block.properties.axis
 end
 
 local function getBlocksAround(pos, size, axis)
    pos = (pos + size.x * axisToOffset(axis) * 0.5 + size._y_ * 0.5):floor()
    local blocks = {}
-   local s = 8
+   local s, s2 = 8, 4
    for x = pos.x - s, pos.x + s do
       blocks[x] = {}
-      for y = pos.y - s, pos.y + s do
+      for y = pos.y - s2, pos.y + s2 do
          blocks[x][y] = {}
          for z = pos.z - s, pos.z + s do
-            blocks[x][y][z] = world.getBlockState(x, y, z).id
+            blocks[x][y][z] = world.getBlockState(x, y, z):toStateString()
          end
       end
    end
@@ -122,9 +117,18 @@ local function addPortal(dimension, portal)
    if loadedChunks[chunkId] then
       loadPortal(loadedChunks[chunkId], portal, id)
    end
+   saveTime = saveDelay
 end
 
 function events.tick()
+   -- save
+   saveTime = math.max(saveTime - 1, -1)
+   if saveTime == 0 then
+      orginalConfigName = config:getName()
+      config:setName(configName)
+      config:save('', portals)
+      config:setName(orginalConfigName)
+   end
    -- basic variables
    local playerPos = player:getPos():floor()
    previousBlock = currentBlock
@@ -158,13 +162,13 @@ function events.tick()
          end
          for portalId, portal in pairs(chunk.portals) do
             local shouldBeLoaded = not world.isChunkLoaded(portal.pos) or world.getBlockState(portal.pos).id == 'minecraft:nether_portal'
-            if not portal.time then print(portal) end
             portal.time = shouldBeLoaded and 40 or portal.time - 1
             if portal.time < 0 then
                for _, v in ipairs(chunk.portals[portalId]) do
                   v:remove()
                end
                chunk.portals[portalId] = nil
+               saveTime = saveDelay
             end
          end
          chunk.time = 20
